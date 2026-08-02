@@ -89,8 +89,8 @@ def fetch_lever(s, r, timeout):
         posted = ""
         if j.get("createdAt"):
             try:
-                posted = dt.datetime.utcfromtimestamp(
-                    j["createdAt"] / 1000).isoformat() + "Z"
+                posted = dt.datetime.fromtimestamp(
+                    j["createdAt"] / 1000, dt.timezone.utc).isoformat()
             except Exception:
                 posted = ""
         out.append(_norm(j.get("id"), r["company"], j.get("text"),
@@ -201,6 +201,12 @@ def location_ok(loc, cfg):
 
 
 # --------------------------------------------------------------- notifications
+def _hdr(s):
+    # HTTP header values must be latin-1, so strip anything that can't encode
+    # (e.g. emoji, non-Western scripts). Accented European chars survive.
+    return (s or "").encode("latin-1", "ignore").decode("latin-1")
+
+
 def notify(cfg, title, body, url):
     topic = cfg["ntfy_topic"]
     if not topic or "CHANGE-ME" in topic:
@@ -208,10 +214,10 @@ def notify(cfg, title, body, url):
     try:
         requests.post(
             f"{cfg['ntfy_server']}/{topic}",
-            data=body.encode("utf-8"),
+            data=body.encode("utf-8"),          # body is UTF-8, emoji OK here
             headers={
-                "Title": title[:200],
-                "Click": url or "",
+                "Title": _hdr(title)[:200],
+                "Click": _hdr(url),
                 "Tags": "briefcase",
                 "Priority": "default",
             },
@@ -259,8 +265,8 @@ def main():
 
     # ---- notify ---------------------------------------------------------
     if first_run:
-        notify(cfg, "JobRadar is armed \U0001F6F0️",
-               f"Tracking {len(registry)} companies. "
+        notify(cfg, "JobRadar is armed",
+               f"\U0001F6F0️ Tracking {len(registry)} companies. "
                f"{len(matched)} matching roles are open now. "
                f"You'll get a ping the moment a NEW one is posted.", "")
         print("First run: primed state silently (no per-job spam).")
@@ -293,7 +299,7 @@ def main():
         "new_this_run": len(new_jobs),
         "jobs": feed,
     })
-    print(f"Wrote data/jobs.json ({len(feed)} shown).")
+    print(f"Wrote docs/data/jobs.json ({len(feed)} shown).")
 
 
 if __name__ == "__main__":
