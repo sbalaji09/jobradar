@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>JobRadar</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#141b24; --panel2:#1b2531; --line:#243040;
+    --txt:#e7edf4; --dim:#8ea1b5; --accent:#4f9cff; --new:#31c48d; --chip:#22303f;
+  }
+  @media (prefers-color-scheme: light){
+    :root{--bg:#f5f7fa;--panel:#fff;--panel2:#f0f3f7;--line:#e2e8f0;
+          --txt:#0f1a26;--dim:#5b6b7c;--accent:#2563eb;--new:#0d9f6e;--chip:#eaf0f7;}
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;}
+  header{position:sticky;top:0;z-index:5;background:var(--bg);
+         border-bottom:1px solid var(--line);padding:16px 18px 12px;}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:20px}
+  .brand small{font-weight:500;color:var(--dim);font-size:13px}
+  .stats{display:flex;flex-wrap:wrap;gap:14px;margin-top:10px;color:var(--dim);font-size:13px}
+  .stats b{color:var(--txt)}
+  .controls{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  input[type=search]{flex:1;min-width:180px;background:var(--panel2);border:1px solid var(--line);
+    color:var(--txt);padding:9px 12px;border-radius:10px;font-size:14px;outline:none}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{background:var(--chip);border:1px solid var(--line);color:var(--dim);
+    padding:6px 11px;border-radius:999px;font-size:13px;cursor:pointer;user-select:none}
+  .chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+  main{max-width:860px;margin:0 auto;padding:14px 14px 60px}
+  .job{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+    padding:13px 15px;margin-bottom:10px;display:flex;gap:12px;align-items:flex-start}
+  .job:hover{border-color:var(--accent)}
+  .jmain{flex:1;min-width:0}
+  .title{font-weight:600;font-size:15px;margin:0 0 3px}
+  .meta{color:var(--dim);font-size:13px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+  .company{color:var(--txt);font-weight:600}
+  .badge{font-size:11px;padding:2px 7px;border-radius:6px;border:1px solid var(--line);color:var(--dim)}
+  .badge.new{background:var(--new);border-color:var(--new);color:#04160e;font-weight:700}
+  .apply{white-space:nowrap;background:var(--accent);color:#fff;text-decoration:none;
+    padding:8px 14px;border-radius:9px;font-size:13px;font-weight:600}
+  .apply:hover{filter:brightness(1.08)}
+  .empty{text-align:center;color:var(--dim);padding:50px 20px}
+  footer{text-align:center;color:var(--dim);font-size:12px;padding:20px}
+  a.src{color:var(--dim)}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">🛰️ JobRadar <small>your own internship radar</small></div>
+  <div class="stats" id="stats">Loading…</div>
+  <div class="controls">
+    <input type="search" id="q" placeholder="Filter by title, company, location…" />
+  </div>
+  <div class="chips" id="chips" style="margin-top:8px">
+    <span class="chip on" data-f="all">All</span>
+    <span class="chip" data-f="new">✨ New</span>
+    <span class="chip" data-f="software">Software</span>
+    <span class="chip" data-f="data">Data/ML/AI</span>
+    <span class="chip" data-f="quant">Quant/Finance</span>
+    <span class="chip" data-f="hardware">Hardware/EE</span>
+  </div>
+</header>
+<main id="list"><div class="empty">Loading postings…</div></main>
+<footer>
+  Built from live company career boards • refreshes every ~15 min •
+  <a class="src" href="https://github.com/">source on GitHub</a>
+</footer>
+
+<script>
+const FAMILIES = {
+  software: ["software","swe","developer","full stack","full-stack","backend","frontend","programming"],
+  data:     ["data scien","data engineer","machine learning","ml ","ai ","a.i.","deep learning","research scientist","research engineer"],
+  quant:    ["quant","trading","trader","quantitative","analyst"],
+  hardware: ["hardware","electrical","embedded","firmware","fpga","asic","silicon","vlsi","rtl"],
+};
+let JOBS = [], FILTER = "all", Q = "";
+
+function timeAgo(iso){
+  if(!iso) return "";
+  const t = Date.parse(iso); if(isNaN(t)) return "";
+  const s = (Date.now()-t)/1000;
+  if(s<3600) return Math.max(1,Math.round(s/60))+"m ago";
+  if(s<86400) return Math.round(s/3600)+"h ago";
+  return Math.round(s/86400)+"d ago";
+}
+function famOf(title){
+  const t=(title||"").toLowerCase();
+  for(const [k,ws] of Object.entries(FAMILIES)) if(ws.some(w=>t.includes(w))) return k;
+  return "";
+}
+function esc(s){return (s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+
+function render(){
+  const list = document.getElementById("list");
+  let rows = JOBS.filter(j=>{
+    if(FILTER==="new" && !j.is_new) return false;
+    if(FILTER!=="all" && FILTER!=="new" && famOf(j.title)!==FILTER) return false;
+    if(Q){
+      const hay=(j.title+" "+j.company+" "+j.location).toLowerCase();
+      if(!hay.includes(Q)) return false;
+    }
+    return true;
+  });
+  if(!JOBS.length){ list.innerHTML='<div class="empty">Waiting for the first scan to populate this.<br>Run the “JobRadar scan” workflow in your repo’s Actions tab.</div>'; return; }
+  if(!rows.length){ list.innerHTML='<div class="empty">No postings match. Try “All” or clear the search.</div>'; return; }
+  list.innerHTML = rows.map(j=>`
+    <div class="job">
+      <div class="jmain">
+        <p class="title">${esc(j.title)}</p>
+        <div class="meta">
+          <span class="company">${esc(j.company)}</span>
+          ${j.location?`<span>· ${esc(j.location)}</span>`:""}
+          ${j.posted?`<span>· ${timeAgo(j.posted)}</span>`:""}
+          <span class="badge">${esc(j.ats)}</span>
+          ${j.is_new?`<span class="badge new">NEW</span>`:""}
+        </div>
+      </div>
+      <a class="apply" href="${esc(j.url)}" target="_blank" rel="noopener">Apply →</a>
+    </div>`).join("");
+}
+
+function setStats(d){
+  const el=document.getElementById("stats");
+  const upd = d.generated ? timeAgo(d.generated) : "—";
+  el.innerHTML =
+    `<span><b>${d.companies_tracked??"—"}</b> companies tracked</span>`+
+    `<span><b>${d.total_matches??JOBS.length}</b> open matches</span>`+
+    `<span><b>${d.new_this_run??0}</b> new last scan</span>`+
+    `<span>updated <b>${upd}</b></span>`;
+}
+
+document.getElementById("q").addEventListener("input",e=>{Q=e.target.value.toLowerCase();render();});
+document.getElementById("chips").addEventListener("click",e=>{
+  const c=e.target.closest(".chip"); if(!c) return;
+  document.querySelectorAll(".chip").forEach(x=>x.classList.remove("on"));
+  c.classList.add("on"); FILTER=c.dataset.f; render();
+});
+
+fetch("data/jobs.json?"+Date.now()).then(r=>r.json()).then(d=>{
+  JOBS = d.jobs||[]; setStats(d); render();
+}).catch(()=>{
+  document.getElementById("stats").textContent="No data yet — the first scan will populate this.";
+  document.getElementById("list").innerHTML='<div class="empty">Waiting for the first scan to run.<br>Trigger the “JobRadar scan” workflow in your repo’s Actions tab.</div>';
+});
+</script>
+</body>
+</html>

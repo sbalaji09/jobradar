@@ -1,0 +1,101 @@
+# ======================= JobRadar configuration =======================
+# Edit this file to change what you get alerted about. After editing, commit
+# and push — the next scheduled run picks it up automatically.
+
+# --- Phone alerts (ntfy) ----------------------------------------------
+# 1. Install the free "ntfy" app (iOS App Store / Google Play).
+# 2. Pick a LONG, hard-to-guess topic name (anyone who knows it can read your
+#    alerts, so treat it like a password). Put the SAME string in both places:
+#    here, and "Subscribe to topic" in the app.
+# In GitHub, you can instead set this via the NTFY_TOPIC repo secret (see README).
+ntfy_topic: "jobradar-CHANGE-ME-pick-something-random-8271"
+ntfy_server: "https://ntfy.sh"
+
+# --- What counts as a match -------------------------------------------
+# A posting matches when its TITLE:
+#   (matches a role_keyword)  AND  (matches a field_keyword)  AND  (no exclude_keyword)
+# All matching is case-insensitive substring. Trailing spaces (e.g. "ai ")
+# are intentional to cut false positives like "chair" / "maintenance".
+
+# Career stage — intern + new grad (you asked for both):
+role_keywords:
+  - intern
+  - internship
+  - co-op
+  - co op
+  - coop
+  - new grad
+  - new graduate
+  - university graduate
+  - early career
+  - "entry level"
+  - "entry-level"
+  - "campus"
+
+# Field — your four families (Software, Data/ML/AI, Quant/Finance, Hardware/EE):
+field_keywords:
+  # software
+  - software
+  - "swe"
+  - developer
+  - "full stack"
+  - full-stack
+  - backend
+  - frontend
+  - "programming"
+  # data / ml / ai
+  - data scien
+  - data engineer
+  - machine learning
+  - "ml "
+  - "ai "
+  - "a.i."
+  - deep learning
+  - research scientist
+  - research engineer
+  # quant / finance
+  - quant
+  - trading
+  - trader
+  - "quantitative"
+  # hardware / EE
+  - hardware
+  - electrical
+  - embedded
+  - firmware
+  - fpga
+  - asic
+  - silicon
+  - "vlsi"
+  - "rtl"
+
+# Kill obvious non-matches (senior roles, unrelated departments):
+exclude_keywords:
+  - senior
+  - "sr."
+  - staff
+  - principal
+  - manager
+  - director
+  - "lead "
+  - "vp "
+  - vice president
+  - sales
+  - marketing
+  - recruit
+  - nurse
+  - clinical
+  - therapist
+  - technician
+  - accountant
+  - counsel
+
+# --- Optional location filter -----------------------------------------
+# Empty = anywhere. Otherwise keep only postings whose location contains one
+# of these (case-insensitive). Examples: ["United States", "Remote", "New York"]
+locations: []
+
+# --- Tuning knobs ------------------------------------------------------
+max_new_notifications: 20   # max per-job pushes in a single run (rest = 1 digest)
+request_timeout: 15         # seconds per board
+concurrency: 32             # parallel board fetches
