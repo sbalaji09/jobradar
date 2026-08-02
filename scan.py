@@ -14,8 +14,8 @@ import concurrent.futures as cf
 import datetime as dt
 import json
 import os
+import re
 import sys
-import urllib.parse
 
 import requests
 import yaml
@@ -33,6 +33,7 @@ def load_config():
     cfg.setdefault("request_timeout", 20)
     cfg.setdefault("max_new_notifications", 20)
     cfg.setdefault("concurrency", 24)
+    cfg.setdefault("github_sources", [])
     for k in ("role_keywords", "field_keywords", "exclude_keywords", "locations"):
         cfg[k] = [str(x).lower() for x in (cfg.get(k) or [])]
     return cfg
@@ -54,16 +55,32 @@ def save_json(path, obj):
 
 # --------------------------------------------------------------- ATS fetchers
 # Each returns a list of normalized dicts:
-#   {id, company, title, location, url, ats, posted}
+#   {id, key, company, title, location, url, ats, posted}
+def _coerce_posted(posted):
+    """Normalize a posted-date to an ISO string (repos use epoch ints)."""
+    if isinstance(posted, (int, float)):
+        try:
+            return dt.datetime.fromtimestamp(posted, dt.timezone.utc).isoformat()
+        except Exception:
+            return ""
+    return str(posted or "")
+
+
 def _norm(id_, company, title, location, url, ats, posted):
+    company = (company or "").strip()
+    title = (title or "").strip()
+    # Stable identity across sources: same company+title => same job, so a role
+    # found on both its ATS and a GitHub list is de-duped and alerted once.
+    key = company.lower() + "|" + re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
     return {
         "id": f"{ats}:{company}:{id_}",
+        "key": key,
         "company": company,
-        "title": (title or "").strip(),
+        "title": title,
         "location": (location or "").strip(),
         "url": url,
         "ats": ats,
-        "posted": posted or "",
+        "posted": _coerce_posted(posted),
     }
 
 
@@ -157,6 +174,25 @@ def fetch_workday(s, r, timeout):
     return out
 
 
+def fetch_github_source(s, url, timeout):
+    """Pull a community listings.json (SimplifyJobs/vanshb03-style) as postings.
+
+    These catch companies that aren't on a scrapable ATS (custom career sites).
+    """
+    d = s.get(url, timeout=timeout, headers=UA).json()
+    out = []
+    for p in d if isinstance(d, list) else []:
+        if p.get("active") is False or p.get("is_visible") is False:
+            continue
+        locs = p.get("locations") or []
+        loc = ", ".join(locs) if isinstance(locs, list) else str(locs)
+        link = p.get("url") or p.get("company_url") or ""
+        pid = p.get("id") or link
+        out.append(_norm(pid, p.get("company_name"), p.get("title"), loc, link,
+                         "github", p.get("date_posted") or p.get("date_updated")))
+    return out
+
+
 FETCHERS = {
     "greenhouse": fetch_greenhouse,
     "lever": fetch_lever,
@@ -243,23 +279,42 @@ def main():
     ok = fail = 0
     timeout = cfg["request_timeout"]
 
+    def keep(jobs):
+        for j in jobs:
+            if matches(j["title"], cfg) and location_ok(j["location"], cfg):
+                matched.append(j)
+
     with cf.ThreadPoolExecutor(max_workers=cfg["concurrency"]) as ex:
         futs = {ex.submit(fetch_board, r, timeout): r for r in registry}
         for fut in cf.as_completed(futs):
             jobs, good = fut.result()
             ok += good
             fail += (not good)
-            for j in jobs:
-                if matches(j["title"], cfg) and location_ok(j["location"], cfg):
-                    matched.append(j)
+            keep(jobs)
 
-    # de-dupe by id, newest first (postings without dates sink to bottom)
-    by_id = {j["id"]: j for j in matched}
-    matched = sorted(by_id.values(), key=lambda j: j["posted"], reverse=True)
-    current_keys = set(by_id.keys())
-    new_jobs = [j for j in matched if j["id"] not in seen]
+    # Extra source: popular community GitHub job lists (individual postings).
+    # Catches companies that aren't on a scrapable ATS (custom career sites).
+    gh_ok = gh_fail = 0
+    for url in cfg["github_sources"]:
+        try:
+            keep(fetch_github_source(requests.Session(), url, timeout))
+            gh_ok += 1
+        except Exception:
+            gh_fail += 1
 
-    print(f"Boards ok={ok} fail={fail} | matched={len(matched)} | new={len(new_jobs)}")
+    # De-dupe by stable key, preferring a direct ATS link over a GitHub-list
+    # entry for the same role; newest first.
+    best = {}
+    for j in matched:
+        k = j["key"]
+        if k not in best or (best[k]["ats"] == "github" and j["ats"] != "github"):
+            best[k] = j
+    matched = sorted(best.values(), key=lambda j: j["posted"], reverse=True)
+    current_keys = set(best.keys())
+    new_jobs = [j for j in matched if j["key"] not in seen]
+
+    print(f"Boards ok={ok} fail={fail} | GitHub sources ok={gh_ok} fail={gh_fail} "
+          f"| matched={len(matched)} | new={len(new_jobs)}")
 
     now = dt.datetime.now(dt.timezone.utc).isoformat()
 
@@ -275,7 +330,7 @@ def main():
         for j in new_jobs[:cap]:
             loc = f" — {j['location']}" if j["location"] else ""
             notify(cfg, f"{j['company']}: {j['title']}",
-                   f"New posting{loc}\nTap to apply.", j["url"])
+                   f"New posting{loc}\nApply: {j['url']}", j["url"])
         if len(new_jobs) > cap:
             notify(cfg, f"+{len(new_jobs) - cap} more new postings",
                    "Open the JobRadar dashboard to see them all.", "")
@@ -284,11 +339,11 @@ def main():
     save_json(state_path, {"seen": sorted(current_keys), "updated": now})
 
     # mark which jobs are new for the dashboard, then write feed (cap 600)
-    new_ids = {j["id"] for j in new_jobs}
+    new_keys = {j["key"] for j in new_jobs}
     feed = []
     for j in matched[:600]:
         jj = dict(j)
-        jj["is_new"] = j["id"] in new_ids
+        jj["is_new"] = j["key"] in new_keys
         feed.append(jj)
     save_json(os.path.join(ROOT, "docs", "data", "jobs.json"), {
         "generated": now,
