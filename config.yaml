@@ -95,6 +95,17 @@ exclude_keywords:
 # of these (case-insensitive). Examples: ["United States", "Remote", "New York"]
 locations: []
 
+# --- Extra job sources: popular community GitHub boards ---------------
+# Pulls INDIVIDUAL postings from these lists too (not just their companies),
+# so you also catch roles at companies that aren't on a scrapable ATS.
+# De-duped against the ATS scan by company+title, so no double alerts.
+# Set to [] to turn off.
+github_sources:
+  - https://raw.githubusercontent.com/SimplifyJobs/Summer2027-Internships/dev/.github/scripts/listings.json
+  - https://raw.githubusercontent.com/SimplifyJobs/New-Grad-Positions/dev/.github/scripts/listings.json
+  - https://raw.githubusercontent.com/vanshb03/Summer2026-Internships/dev/.github/scripts/listings.json
+  - https://raw.githubusercontent.com/vanshb03/New-Grad-2025/dev/.github/scripts/listings.json
+
 # --- Tuning knobs ------------------------------------------------------
 max_new_notifications: 20   # max per-job pushes in a single run (rest = 1 digest)
 request_timeout: 15         # seconds per board
